@@ -59,32 +59,33 @@ public class PickItSettings : ISettings
     [JsonIgnore]
     public ToggleNode DebugHighlight { get; set; } = new ToggleNode(false);
 
-    [Menu("Mouse Movement Type")]
-    public ListNode MouseMovementType { get; set; } = new ListNode() { 
-        Value = MouseMovementMode.Gaussian.ToString(),
-        Values = Enum.GetNames(typeof(MouseMovementMode)).ToList()
-    };
-
     [Submenu]
     public class MouseMovementSettings
     {
-        [Menu("Movement Type")]
+        [Menu("Movement Type", "For most human-like movement:\n1. Start with 'Gaussian' - it's the most natural\n2. 'Perlin' adds subtle noise/shakiness like a real hand\n3. 'Combined' mixes Gaussian + Perlin + Bezier for anti-pattern\n4. Avoid 'Bezier' alone as it's too predictable\n\nTip: Switch between Gaussian and Combined occasionally")]
         public ListNode MovementType { get; set; } = new ListNode() { 
             Value = MouseMovementMode.Gaussian.ToString(),
             Values = Enum.GetNames(typeof(MouseMovementMode)).ToList()
         };
 
-        [Menu("Base Movement Speed")]
+        [Menu("Base Movement Speed", "Controls how fast the mouse moves\n" +
+            "Higher = faster, more direct\n" +
+            "Lower = slower, smoother")]
         public RangeNode<int> BaseSpeed { get; set; } = new RangeNode<int>(40, 10, 100);
 
-        [Menu("Minimum Steps")]
+        [Menu("Minimum Steps", "Controls how many points the mouse follows\n" +
+            "More steps = smoother movement but slower\n" +
+            "Fewer steps = faster but more rigid")]
         public RangeNode<int> MinSteps { get; set; } = new RangeNode<int>(5, 3, 20);
 
-        [Menu("Base Delay (ms)")]
+        [Menu("Log Mouse Movement", "Debug feature - leave off unless troubleshooting")]
+        public ToggleNode LogMovement { get; set; } = new ToggleNode(false);
+
+        [Menu("Base Delay (ms)", "Controls time between each mouse movement step:\n\n- Higher values (25ms): Slower, deliberate movement\n- Lower values (10ms): Faster movement\n- Works with MinSteps and BaseSpeed for overall pattern\n\nRecommended: 18-25ms\n")]
         public RangeNode<int> BaseDelay { get; set; } = new RangeNode<int>(20, 5, 50);
 
-        [Menu("Randomization Amount")]
-        public RangeNode<float> RandomizationFactor { get; set; } = new RangeNode<float>(0.1f, 0.01f, 0.5f);
+        [Menu("Randomization Amount", "\nRecommended: 0.12-0.18\n<0.1: High (too mechanical)\n>0.2: High (too erratic)\n>0.3: Extreme")]
+        public RangeNode<float> RandomizationFactor { get; set; } = new RangeNode<float>(0.15f, 0.12f, 0.18f);
     }
 
     [Menu("Mouse Movement")]

@@ -608,15 +608,18 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
                         (float)BezierRandom(start.X, end.X, progress),
                         (float)BezierRandom(start.Y, end.Y, progress)
                     );
+                    
                     var perlinOffset = new Vector2(
-                        (float)PerlinRandom(0, 1, progress * 10),
-                        (float)PerlinRandom(0, 1, progress * 10)
+                        (float)PerlinRandom(0, 0.3, progress * 10),
+                        (float)PerlinRandom(0, 0.3, progress * 10)
                     );
+                    
                     var gaussianOffset = new Vector2(
-                        (float)GaussianRandom(0, 0.5),
-                        (float)GaussianRandom(0, 0.5)
+                        (float)GaussianRandom(0, 0.1),
+                        (float)GaussianRandom(0, 0.1)
                     );
-                    return bezierBase + perlinOffset + gaussianOffset;
+                    
+                    return bezierBase + (perlinOffset * 0.7f) + (gaussianOffset * 0.3f);
 
                 default:
                     return Vector2.Lerp(start, end, progress);
@@ -630,8 +633,11 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         var targetPos = position;
         var movementMode = Enum.Parse<MouseMovementMode>(Settings.MouseMovement.MovementType.Value);
         
-        DebugWindow.LogMsg($"[Mouse] Start: {currentPos:F0} -> Target: {targetPos:F0} (Distance: {Vector2.Distance(currentPos, targetPos):F0})");
-        DebugWindow.LogMsg($"[Mouse] Using movement mode: {movementMode}");
+        if (Settings.MouseMovement.LogMovement)
+        {
+            DebugWindow.LogMsg($"[Mouse] Start: {currentPos:F0} -> Target: {targetPos:F0} (Distance: {Vector2.Distance(currentPos, targetPos):F0})");
+            DebugWindow.LogMsg($"[Mouse] Using movement mode: {movementMode}");
+        }
         
         var distance = Vector2.Distance(currentPos, targetPos);
         var baseSteps = Math.Max(Settings.MouseMovement.MinSteps.Value, 
@@ -651,7 +657,10 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
             _ => baseSteps
         };
         
-        DebugWindow.LogMsg($"[Mouse] Using {actualSteps} steps (base: {baseSteps})");
+        if (Settings.MouseMovement.LogMovement)
+        {
+            DebugWindow.LogMsg($"[Mouse] Using {actualSteps} steps (base: {baseSteps})");
+        }
         
         var lastDelay = 0;
         var totalTime = 0;
@@ -681,7 +690,7 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
             lastDelay = newDelay;
             totalTime += newDelay;
             
-            if (i % 5 == 0)
+            if (Settings.MouseMovement.LogMovement && i % 5 == 0)
             {
                 DebugWindow.LogMsg($"[Mouse] Step {i}: Pos={nextPos:F0}, Delay={newDelay}ms, Speed={speed:F2}");
             }
@@ -690,7 +699,10 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         }
         
         Input.SetCursorPos(targetPos);
-        DebugWindow.LogMsg($"[Mouse] Complete - Total time: {totalTime}ms");
+        if (Settings.MouseMovement.LogMovement)
+        {
+            DebugWindow.LogMsg($"[Mouse] Complete - Total time: {totalTime}ms");
+        }
         
         return await TaskUtils.CheckEveryFrame(() => IsTargeted(item, label), new CancellationTokenSource(60).Token);
     }
