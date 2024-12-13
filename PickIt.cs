@@ -27,6 +27,7 @@ namespace PickIt;
 
 public partial class PickIt : BaseSettingsPlugin<PickItSettings>
 {
+    private const int baseDelay = 10; // Base delay in milliseconds between mouse movements
     private static double _fatigueLevel = 0;
     private static DateTime _lastActionTime = DateTime.Now;
     private static readonly Random _random = new Random();
@@ -678,6 +679,8 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
 
     private async SyncTask<bool> SetCursorPositionAsync(Vector2 position, Entity item, Element label)
     {
+        var state = new MouseMovementState { Momentum = 0.3f };
+
         var fatigueVariation = Settings.Fatigue.EnableFatigue ? 
             (float)(_fatigueLevel * Settings.Fatigue.FatigueImpactMultiplier.Value) : 
             0f;
@@ -719,37 +722,24 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         for (int i = 0; i < actualSteps; i++)
         {
             var progress = (i + 1f) / actualSteps;
-            var speed = 1 - Math.Pow(Math.Abs(progress - 0.5) * 2, 2);
             
-            var nextPos = MouseMovement.GetNextPoint(
-                currentPos, 
-                targetPos, 
-                progress, 
-                movementMode,
-                fatigueVariation
-            );
+            var nextPos = MouseMovement.GetNextPoint(currentPos, targetPos, progress, movementMode, fatigueVariation);
+            nextPos = ApplyMomentum(nextPos, targetPos, state);
+            nextPos = AddMicroCorrections(nextPos, progress);
             
-            Input.SetCursorPos(nextPos);
+            var speedMultiplier = GetNaturalSpeedMultiplier(progress);
+            var delay = (int)(baseDelay * (1 / speedMultiplier));
             
-            var baseDelay = Math.Max(5, Settings.MouseMovement.BaseDelay.Value * (1 - speed));
-            var newDelay = (int)MouseMovement.GetNextPoint(
-                new Vector2((float)lastDelay, (float)lastDelay),
-                new Vector2((float)baseDelay, (float)baseDelay),
-                progress,
-                movementMode,
-                fatigueVariation
-            ).X;
-                
-            newDelay = Math.Max(1, newDelay);
-            lastDelay = newDelay;
-            totalTime += newDelay;
-            
-            if (Settings.MouseMovement.LogMovement && i % 5 == 0)
+            if (Settings.MouseMovement.LogMovement)
             {
-                DebugWindow.LogMsg($"[Mouse] Step {i}: Pos={nextPos:F0}, Delay={newDelay}ms, Speed={speed:F2}");
+                DebugWindow.LogMsg($"[Mouse] Step {i + 1}/{actualSteps} - Position: {nextPos:F0}, Speed Multiplier: {speedMultiplier:F2}");
+                DebugWindow.LogMsg($"[Mouse] Momentum: {state.Velocity:F2}, Micro-corrections applied: {progress > 0.8f}");
             }
             
-            await Task.Delay(newDelay);
+            Input.SetCursorPos(nextPos);
+            await Task.Delay(delay);
+            
+            state.LastPosition = nextPos;
         }
         
         Input.SetCursorPos(targetPos);
@@ -762,4 +752,50 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
     }
 
     #endregion
+
+    public class MouseMovementState
+    {
+        public Vector2 Velocity { get; set; }
+        public Vector2 LastPosition { get; set; }
+        public float Momentum { get; set; }
+    }
+
+    // Add momentum to mouse movement calculations
+    private static Vector2 ApplyMomentum(Vector2 currentPos, Vector2 targetPos, MouseMovementState state)
+    {
+        var direction = targetPos - currentPos;
+        state.Velocity = Vector2.Lerp(state.Velocity, direction * 0.1f, 1 - state.Momentum);
+        return currentPos + state.Velocity;
+    }
+
+    private static Vector2 AddMicroCorrections(Vector2 position, float progress)
+    {
+        // Humans often make small corrections near the target
+        if (progress > 0.8f)
+        {
+            var microAdjustment = new Vector2(
+                (float)GaussianRandom(0, 0.5),
+                (float)GaussianRandom(0, 0.5)
+            );
+            return position + microAdjustment;
+        }
+        return position;
+    }
+
+    private static float GetNaturalSpeedMultiplier(float progress)
+    {
+        // Slow start, faster middle, slower end
+        return 1 - (float)(
+            Math.Pow(progress - 0.5, 4) * 4 + // Quartic ease
+            Math.Sin(progress * Math.PI) * 0.2 // Slight wave pattern
+        );
+    }
+
+    private static double GaussianRandom(double mean, double stdDev)
+    {
+        double u1 = 1.0 - _random.NextDouble();
+        double u2 = 1.0 - _random.NextDouble();
+        double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+        return mean + stdDev * randStdNormal;
+    }   
 }
