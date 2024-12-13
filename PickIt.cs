@@ -554,10 +554,144 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         return label is { HasShinyHighlight: true };
     }
 
-    private static async SyncTask<bool> SetCursorPositionAsync(Vector2 position, Entity item, Element label)
+    private class MouseMovement
     {
-        DebugWindow.LogMsg($"Set cursor pos: {position}");
-        Input.SetCursorPos(position);
+        public static double GaussianRandom(double mean, double stdDev)
+        {
+            double u1 = 1.0 - Random.Shared.NextDouble();
+            double u2 = 1.0 - Random.Shared.NextDouble();
+            double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+            return mean + stdDev * randStdNormal;
+        }
+
+        public static double PerlinRandom(double mean, double amplitude, double t)
+        {
+            double noise = Math.Sin(t) * Math.Cos(t * 2.1) * Math.Sin(t * 1.72);
+            return mean + noise * amplitude;
+        }
+
+        public static double BezierRandom(double start, double end, double t)
+        {
+            double control1 = start + (end - start) * 0.3 * (1 + Random.Shared.NextDouble());
+            double control2 = start + (end - start) * 0.7 * (1 + Random.Shared.NextDouble());
+            return Math.Pow(1 - t, 3) * start + 
+                   3 * Math.Pow(1 - t, 2) * t * control1 + 
+                   3 * (1 - t) * Math.Pow(t, 2) * control2 + 
+                   Math.Pow(t, 3) * end;
+        }
+
+        public static Vector2 GetNextPoint(Vector2 start, Vector2 end, float progress, MouseMovementMode mode)
+        {
+            switch (mode)
+            {
+                case MouseMovementMode.Gaussian:
+                    var interpolated = Vector2.Lerp(start, end, progress);
+                    return interpolated + new Vector2(
+                        (float)GaussianRandom(0, 2),
+                        (float)GaussianRandom(0, 2)
+                    );
+
+                case MouseMovementMode.Perlin:
+                    return new Vector2(
+                        (float)PerlinRandom(start.X + (end.X - start.X) * progress, 2, progress * 10),
+                        (float)PerlinRandom(start.Y + (end.Y - start.Y) * progress, 2, progress * 10)
+                    );
+
+                case MouseMovementMode.Bezier:
+                    return new Vector2(
+                        (float)BezierRandom(start.X, end.X, progress),
+                        (float)BezierRandom(start.Y, end.Y, progress)
+                    );
+
+                case MouseMovementMode.Combined:
+                    var bezierBase = new Vector2(
+                        (float)BezierRandom(start.X, end.X, progress),
+                        (float)BezierRandom(start.Y, end.Y, progress)
+                    );
+                    var perlinOffset = new Vector2(
+                        (float)PerlinRandom(0, 1, progress * 10),
+                        (float)PerlinRandom(0, 1, progress * 10)
+                    );
+                    var gaussianOffset = new Vector2(
+                        (float)GaussianRandom(0, 0.5),
+                        (float)GaussianRandom(0, 0.5)
+                    );
+                    return bezierBase + perlinOffset + gaussianOffset;
+
+                default:
+                    return Vector2.Lerp(start, end, progress);
+            }
+        }
+    }
+
+    private async SyncTask<bool> SetCursorPositionAsync(Vector2 position, Entity item, Element label)
+    {
+        var currentPos = Input.MousePosition;
+        var targetPos = position;
+        var movementMode = Enum.Parse<MouseMovementMode>(Settings.MouseMovement.MovementType.Value);
+        
+        DebugWindow.LogMsg($"[Mouse] Start: {currentPos:F0} -> Target: {targetPos:F0} (Distance: {Vector2.Distance(currentPos, targetPos):F0})");
+        DebugWindow.LogMsg($"[Mouse] Using movement mode: {movementMode}");
+        
+        var distance = Vector2.Distance(currentPos, targetPos);
+        var baseSteps = Math.Max(Settings.MouseMovement.MinSteps.Value, 
+            (int)(distance / Settings.MouseMovement.BaseSpeed.Value));
+        
+        var randomFactor = Settings.MouseMovement.RandomizationFactor.Value;
+        
+        // Calculate steps based on selected movement mode
+        var actualSteps = movementMode switch
+        {
+            MouseMovementMode.Gaussian => (int)MouseMovement.GaussianRandom(baseSteps, baseSteps * randomFactor),
+            MouseMovementMode.Perlin => (int)MouseMovement.PerlinRandom(baseSteps, baseSteps * randomFactor, Random.Shared.NextDouble() * 10),
+            MouseMovementMode.Bezier => (int)MouseMovement.BezierRandom(baseSteps * (1 - randomFactor), baseSteps * (1 + randomFactor), Random.Shared.NextDouble()),
+            MouseMovementMode.Combined => (int)((MouseMovement.GaussianRandom(baseSteps, baseSteps * randomFactor/2) + 
+                                                MouseMovement.PerlinRandom(baseSteps, baseSteps * randomFactor/2, Random.Shared.NextDouble() * 10) +
+                                                MouseMovement.BezierRandom(baseSteps * (1 - randomFactor/2), baseSteps * (1 + randomFactor/2), Random.Shared.NextDouble())) / 3),
+            _ => baseSteps
+        };
+        
+        DebugWindow.LogMsg($"[Mouse] Using {actualSteps} steps (base: {baseSteps})");
+        
+        var lastDelay = 0;
+        var totalTime = 0;
+        
+        for (int i = 0; i < actualSteps; i++)
+        {
+            var progress = (i + 1f) / actualSteps;
+            var speed = 1 - Math.Pow(Math.Abs(progress - 0.5) * 2, 2);
+            
+            var nextPos = MouseMovement.GetNextPoint(
+                currentPos, 
+                targetPos, 
+                progress, 
+                movementMode
+            );
+            
+            Input.SetCursorPos(nextPos);
+            
+            var baseDelay = Math.Max(5, Settings.MouseMovement.BaseDelay.Value * (1 - speed));
+            var newDelay = (int)MouseMovement.GetNextPoint(
+                new Vector2((float)lastDelay, (float)lastDelay),
+                new Vector2((float)baseDelay, (float)baseDelay),
+                progress,
+                movementMode).X;
+                
+            newDelay = Math.Max(1, newDelay);
+            lastDelay = newDelay;
+            totalTime += newDelay;
+            
+            if (i % 5 == 0)
+            {
+                DebugWindow.LogMsg($"[Mouse] Step {i}: Pos={nextPos:F0}, Delay={newDelay}ms, Speed={speed:F2}");
+            }
+            
+            await Task.Delay(newDelay);
+        }
+        
+        Input.SetCursorPos(targetPos);
+        DebugWindow.LogMsg($"[Mouse] Complete - Total time: {totalTime}ms");
+        
         return await TaskUtils.CheckEveryFrame(() => IsTargeted(item, label), new CancellationTokenSource(60).Token);
     }
 

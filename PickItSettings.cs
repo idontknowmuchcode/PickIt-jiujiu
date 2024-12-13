@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Forms;
+using System.Linq;
 using ExileCore2.Shared.Attributes;
 using ExileCore2.Shared.Interfaces;
 using ExileCore2.Shared.Nodes;
@@ -10,6 +12,14 @@ using Newtonsoft.Json;
 using System.Numerics;
 
 namespace PickIt;
+
+public enum MouseMovementMode
+{
+    Gaussian,
+    Perlin,
+    Bezier,
+    Combined
+}
 
 public class PickItSettings : ISettings
 {
@@ -48,6 +58,37 @@ public class PickItSettings : ISettings
 
     [JsonIgnore]
     public ToggleNode DebugHighlight { get; set; } = new ToggleNode(false);
+
+    [Menu("Mouse Movement Type")]
+    public ListNode MouseMovementType { get; set; } = new ListNode() { 
+        Value = MouseMovementMode.Gaussian.ToString(),
+        Values = Enum.GetNames(typeof(MouseMovementMode)).ToList()
+    };
+
+    [Submenu]
+    public class MouseMovementSettings
+    {
+        [Menu("Movement Type")]
+        public ListNode MovementType { get; set; } = new ListNode() { 
+            Value = MouseMovementMode.Gaussian.ToString(),
+            Values = Enum.GetNames(typeof(MouseMovementMode)).ToList()
+        };
+
+        [Menu("Base Movement Speed")]
+        public RangeNode<int> BaseSpeed { get; set; } = new RangeNode<int>(40, 10, 100);
+
+        [Menu("Minimum Steps")]
+        public RangeNode<int> MinSteps { get; set; } = new RangeNode<int>(5, 3, 20);
+
+        [Menu("Base Delay (ms)")]
+        public RangeNode<int> BaseDelay { get; set; } = new RangeNode<int>(20, 5, 50);
+
+        [Menu("Randomization Amount")]
+        public RangeNode<float> RandomizationFactor { get; set; } = new RangeNode<float>(0.1f, 0.01f, 0.5f);
+    }
+
+    [Menu("Mouse Movement")]
+    public MouseMovementSettings MouseMovement { get; set; } = new MouseMovementSettings();
 }
 
 [Submenu(RenderMethod = nameof(Render))]
