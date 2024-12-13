@@ -27,6 +27,9 @@ namespace PickIt;
 
 public partial class PickIt : BaseSettingsPlugin<PickItSettings>
 {
+    private static double _fatigueLevel = 0;
+    private static DateTime _lastActionTime = DateTime.Now;
+    private static readonly Random _random = new Random();
     private readonly CachedValue<List<LabelOnGround>> _chestLabels;
     private readonly CachedValue<LabelOnGround> _portalLabel;
     private readonly CachedValue<List<LabelOnGround>> _corpseLabels;
@@ -40,6 +43,7 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
     private readonly Stopwatch _sinceLastClick = Stopwatch.StartNew();
     private Element UIHoverWithFallback => GameController.IngameState.UIHover switch { null or { Address: 0 } => GameController.IngameState.UIHoverElement, var s => s };
     private bool OkayToClick => _sinceLastClick.ElapsedMilliseconds > Settings.PauseBetweenClicks;
+    private static Vector2 _lastMousePosition = Input.MousePosition;
 
     public PickIt()
     {
@@ -176,6 +180,16 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
             var f = ItemFilter.LoadFromString(Settings.FilterTest);
             var matched = f.Matches(new ItemData(h.Entity, GameController));
             DebugWindow.LogMsg($"Debug item match: {matched}");
+        }
+
+        if (Settings.MouseMovement.ShowDebugInfo)
+        {
+            ImGui.Begin($"{Name} Mouse Debug");
+            ImGui.Text($"Fatigue Level: {_fatigueLevel:F3}");
+            ImGui.Text($"Time Since Last Action: {(DateTime.Now - _lastActionTime).TotalSeconds:F1}s");
+            ImGui.Text($"Current Movement Mode: {Settings.MouseMovement.MovementType.Value}");
+            ImGui.Text($"Fatigue Variation: {(_fatigueLevel * 0.3):F3}");
+            ImGui.End();
         }
     }
 
@@ -507,6 +521,7 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
             {
                 if (!IsTargeted(item, label))
                 {
+                    UpdateFatigue();
                     await SetCursorPositionAsync(position, item, label);
                 }
                 else
@@ -554,81 +569,119 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         return label is { HasShinyHighlight: true };
     }
 
-    private class MouseMovement
+    public enum MouseMovementMode
     {
+        Linear,
+        Gaussian,
+        Perlin,
+        Combined
+    }
+
+    public class MouseMovement
+    {
+        public static Vector2 GetNextPoint(Vector2 start, Vector2 end, float progress, MouseMovementMode mode, float fatigueVariation)
+        {
+            switch (mode)
+            {
+                case MouseMovementMode.Gaussian:
+                    var interpolated = Vector2.Lerp(start, end, progress);
+                    var variance = 2 * (1 + fatigueVariation);
+                    return interpolated + new Vector2(
+                        (float)GaussianRandom(0, variance),
+                        (float)GaussianRandom(0, variance)
+                    );
+
+                case MouseMovementMode.Perlin:
+                    var amplitude = 2 * (1 + fatigueVariation);
+                    return new Vector2(
+                        (float)PerlinRandom(start.X + (end.X - start.X) * progress, amplitude, progress * 10),
+                        (float)PerlinRandom(start.Y + (end.Y - start.Y) * progress, amplitude, progress * 10)
+                    );
+
+                case MouseMovementMode.Combined:
+                    var basePoint = Vector2.Lerp(start, end, progress);
+                    
+                    var perlinAmplitude = 0.3f * (1 + fatigueVariation);
+                    var gaussianAmplitude = 0.3f * (1 + fatigueVariation);
+                    
+                    var perlinOffset = new Vector2(
+                        (float)PerlinRandom(0, perlinAmplitude, progress * 10),
+                        (float)PerlinRandom(0, perlinAmplitude, progress * 10)
+                    );
+                    
+                    var gaussianOffset = new Vector2(
+                        (float)GaussianRandom(0, gaussianAmplitude),
+                        (float)GaussianRandom(0, gaussianAmplitude)
+                    );
+                    
+                    return basePoint + (perlinOffset * 0.5f) + (gaussianOffset * 0.5f);
+
+                default: 
+                    return Vector2.Lerp(start, end, progress);
+            }
+        }
+
         public static double GaussianRandom(double mean, double stdDev)
         {
-            double u1 = 1.0 - Random.Shared.NextDouble();
-            double u2 = 1.0 - Random.Shared.NextDouble();
+            double u1 = 1.0 - _random.NextDouble();
+            double u2 = 1.0 - _random.NextDouble();
             double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
             return mean + stdDev * randStdNormal;
         }
 
         public static double PerlinRandom(double mean, double amplitude, double t)
         {
-            double noise = Math.Sin(t) * Math.Cos(t * 2.1) * Math.Sin(t * 1.72);
-            return mean + noise * amplitude;
+            double noise = Math.Sin(t * 12.9898 + t * 78.233) * 43758.5453123;
+            noise = noise - Math.Floor(noise);
+            return mean + (noise * 2 - 1) * amplitude;
+        }
+    }
+
+    private void UpdateFatigue()
+    {
+        if (!Settings.Fatigue.EnableFatigue)
+        {
+            _fatigueLevel = 0;
+            return;
         }
 
-        public static double BezierRandom(double start, double end, double t)
-        {
-            double control1 = start + (end - start) * 0.3 * (1 + Random.Shared.NextDouble());
-            double control2 = start + (end - start) * 0.7 * (1 + Random.Shared.NextDouble());
-            return Math.Pow(1 - t, 3) * start + 
-                   3 * Math.Pow(1 - t, 2) * t * control1 + 
-                   3 * (1 - t) * Math.Pow(t, 2) * control2 + 
-                   Math.Pow(t, 3) * end;
-        }
+        var now = DateTime.Now;
+        var timeSinceLastAction = (now - _lastActionTime).TotalMinutes;
 
-        public static Vector2 GetNextPoint(Vector2 start, Vector2 end, float progress, MouseMovementMode mode)
+        if (timeSinceLastAction > Settings.Fatigue.RestRecoveryMinutes)
         {
-            switch (mode)
+            _fatigueLevel = 0;
+        }
+        else
+        {
+            var currentPos = Input.MousePosition;
+            var distance = Vector2.Distance(currentPos, _lastMousePosition);
+            
+            var fatigueIncrease = Settings.Fatigue.BaseFatigueIncrease.Value + 
+                (distance / 1000.0) * Settings.Fatigue.DistanceFatigueMultiplier.Value;
+            
+            _fatigueLevel = Math.Min(
+                Settings.Fatigue.MaxFatigue.Value, 
+                _fatigueLevel + fatigueIncrease
+            );
+
+            if (_random.NextDouble() < Settings.Fatigue.RecoveryChance.Value)
             {
-                case MouseMovementMode.Gaussian:
-                    var interpolated = Vector2.Lerp(start, end, progress);
-                    return interpolated + new Vector2(
-                        (float)GaussianRandom(0, 2),
-                        (float)GaussianRandom(0, 2)
-                    );
-
-                case MouseMovementMode.Perlin:
-                    return new Vector2(
-                        (float)PerlinRandom(start.X + (end.X - start.X) * progress, 2, progress * 10),
-                        (float)PerlinRandom(start.Y + (end.Y - start.Y) * progress, 2, progress * 10)
-                    );
-
-                case MouseMovementMode.Bezier:
-                    return new Vector2(
-                        (float)BezierRandom(start.X, end.X, progress),
-                        (float)BezierRandom(start.Y, end.Y, progress)
-                    );
-
-                case MouseMovementMode.Combined:
-                    var bezierBase = new Vector2(
-                        (float)BezierRandom(start.X, end.X, progress),
-                        (float)BezierRandom(start.Y, end.Y, progress)
-                    );
-                    
-                    var perlinOffset = new Vector2(
-                        (float)PerlinRandom(0, 0.3, progress * 10),
-                        (float)PerlinRandom(0, 0.3, progress * 10)
-                    );
-                    
-                    var gaussianOffset = new Vector2(
-                        (float)GaussianRandom(0, 0.1),
-                        (float)GaussianRandom(0, 0.1)
-                    );
-                    
-                    return bezierBase + (perlinOffset * 0.7f) + (gaussianOffset * 0.3f);
-
-                default:
-                    return Vector2.Lerp(start, end, progress);
+                _fatigueLevel = Math.Max(0, _fatigueLevel - Settings.Fatigue.RecoveryAmount.Value);
             }
+
+            _lastMousePosition = currentPos;
         }
+
+        _lastActionTime = now;
     }
 
     private async SyncTask<bool> SetCursorPositionAsync(Vector2 position, Entity item, Element label)
     {
+        var fatigueVariation = Settings.Fatigue.EnableFatigue ? 
+            (float)(_fatigueLevel * Settings.Fatigue.FatigueImpactMultiplier.Value) : 
+            0f;
+
         var currentPos = Input.MousePosition;
         var targetPos = position;
         var movementMode = Enum.Parse<MouseMovementMode>(Settings.MouseMovement.MovementType.Value);
@@ -645,15 +698,13 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         
         var randomFactor = Settings.MouseMovement.RandomizationFactor.Value;
         
-        // Calculate steps based on selected movement mode
         var actualSteps = movementMode switch
         {
             MouseMovementMode.Gaussian => (int)MouseMovement.GaussianRandom(baseSteps, baseSteps * randomFactor),
             MouseMovementMode.Perlin => (int)MouseMovement.PerlinRandom(baseSteps, baseSteps * randomFactor, Random.Shared.NextDouble() * 10),
-            MouseMovementMode.Bezier => (int)MouseMovement.BezierRandom(baseSteps * (1 - randomFactor), baseSteps * (1 + randomFactor), Random.Shared.NextDouble()),
             MouseMovementMode.Combined => (int)((MouseMovement.GaussianRandom(baseSteps, baseSteps * randomFactor/2) + 
                                                 MouseMovement.PerlinRandom(baseSteps, baseSteps * randomFactor/2, Random.Shared.NextDouble() * 10) +
-                                                MouseMovement.BezierRandom(baseSteps * (1 - randomFactor/2), baseSteps * (1 + randomFactor/2), Random.Shared.NextDouble())) / 3),
+                                                MouseMovement.PerlinRandom(baseSteps, baseSteps * randomFactor/2, Random.Shared.NextDouble() * 10)) / 3),
             _ => baseSteps
         };
         
@@ -664,7 +715,7 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
         
         var lastDelay = 0;
         var totalTime = 0;
-        
+
         for (int i = 0; i < actualSteps; i++)
         {
             var progress = (i + 1f) / actualSteps;
@@ -674,7 +725,8 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
                 currentPos, 
                 targetPos, 
                 progress, 
-                movementMode
+                movementMode,
+                fatigueVariation
             );
             
             Input.SetCursorPos(nextPos);
@@ -684,7 +736,9 @@ public partial class PickIt : BaseSettingsPlugin<PickItSettings>
                 new Vector2((float)lastDelay, (float)lastDelay),
                 new Vector2((float)baseDelay, (float)baseDelay),
                 progress,
-                movementMode).X;
+                movementMode,
+                fatigueVariation
+            ).X;
                 
             newDelay = Math.Max(1, newDelay);
             lastDelay = newDelay;

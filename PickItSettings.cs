@@ -15,9 +15,9 @@ namespace PickIt;
 
 public enum MouseMovementMode
 {
+    Linear,
     Gaussian,
     Perlin,
-    Bezier,
     Combined
 }
 
@@ -62,6 +62,13 @@ public class PickItSettings : ISettings
     [Submenu]
     public class MouseMovementSettings
     {
+        
+        [Menu("Show Debug Info", "Display fatigue and movement debug information")]
+        public ToggleNode ShowDebugInfo { get; set; } = new ToggleNode(false);
+
+        [Menu("Log Mouse Movement", "Debug feature - leave off unless troubleshooting")]
+        public ToggleNode LogMovement { get; set; } = new ToggleNode(false);
+
         [Menu("Movement Type", "For most human-like movement:\n1. Start with 'Gaussian' - it's the most natural\n2. 'Perlin' adds subtle noise/shakiness like a real hand\n3. 'Combined' mixes Gaussian + Perlin + Bezier for anti-pattern\n4. Avoid 'Bezier' alone as it's too predictable\n\nTip: Switch between Gaussian and Combined occasionally")]
         public ListNode MovementType { get; set; } = new ListNode() { 
             Value = MouseMovementMode.Gaussian.ToString(),
@@ -71,25 +78,61 @@ public class PickItSettings : ISettings
         [Menu("Base Movement Speed", "Controls how fast the mouse moves\n" +
             "Higher = faster, more direct\n" +
             "Lower = slower, smoother")]
-        public RangeNode<int> BaseSpeed { get; set; } = new RangeNode<int>(40, 10, 100);
+        public RangeNode<int> BaseSpeed { get; set; } = new RangeNode<int>(25, 15, 100);
 
         [Menu("Minimum Steps", "Controls how many points the mouse follows\n" +
             "More steps = smoother movement but slower\n" +
             "Fewer steps = faster but more rigid")]
-        public RangeNode<int> MinSteps { get; set; } = new RangeNode<int>(5, 3, 20);
+        public RangeNode<int> MinSteps { get; set; } = new RangeNode<int>(8, 4, 15);
 
-        [Menu("Log Mouse Movement", "Debug feature - leave off unless troubleshooting")]
-        public ToggleNode LogMovement { get; set; } = new ToggleNode(false);
+      
 
         [Menu("Base Delay (ms)", "Controls time between each mouse movement step:\n\n- Higher values (25ms): Slower, deliberate movement\n- Lower values (10ms): Faster movement\n- Works with MinSteps and BaseSpeed for overall pattern\n\nRecommended: 18-25ms\n")]
-        public RangeNode<int> BaseDelay { get; set; } = new RangeNode<int>(20, 5, 50);
+        public RangeNode<int> BaseDelay { get; set; } = new RangeNode<int>(22, 15, 50);
 
         [Menu("Randomization Amount", "\nRecommended: 0.12-0.18\n<0.1: High (too mechanical)\n>0.2: High (too erratic)\n>0.3: Extreme")]
-        public RangeNode<float> RandomizationFactor { get; set; } = new RangeNode<float>(0.15f, 0.12f, 0.18f);
+        public RangeNode<float> RandomizationFactor { get; set; } = new RangeNode<float>(0.15f, 0.08f, 0.4f);
+
     }
 
     [Menu("Mouse Movement")]
     public MouseMovementSettings MouseMovement { get; set; } = new MouseMovementSettings();
+
+    [Submenu]
+    public class FatigueSettings
+    {
+        [Menu("Enable Fatigue System", "Simulates human-like mouse fatigue:\n\n" +
+            "- Gradually increases movement variation over time\n" +
+            "- Recovers during periods of inactivity\n" +
+            "- Affects cursor speed and precision\n" +
+            "- Creates more natural, varied movements\n\n" +
+            "Recommended: Keep enabled for most human-like behavior")]
+        public ToggleNode EnableFatigue { get; set; } = new ToggleNode(true);
+
+        [Menu("Base Fatigue Increase", "Base amount of fatigue added per action\nHigher = faster fatigue buildup")]
+        public RangeNode<float> BaseFatigueIncrease { get; set; } = new RangeNode<float>(0.002f, 0.0005f, 0.005f);
+
+        [Menu("Distance-Based Fatigue", "Additional fatigue based on mouse movement distance\nHigher = more fatigue for longer movements")]
+        public RangeNode<float> DistanceFatigueMultiplier { get; set; } = new RangeNode<float>(0.001f, 0.0002f, 0.003f);
+
+        [Menu("Recovery Rate", "Chance to reduce fatigue slightly each action\nHigher = faster recovery")]
+        public RangeNode<float> RecoveryChance { get; set; } = new RangeNode<float>(0.15f, 0.05f, 0.25f);
+
+        [Menu("Recovery Amount", "How much fatigue is reduced when recovery occurs")]
+        public RangeNode<float> RecoveryAmount { get; set; } = new RangeNode<float>(0.03f, 0.01f, 0.08f);
+
+        [Menu("Rest Recovery Time", "Minutes of inactivity before fatigue fully resets")]
+        public RangeNode<float> RestRecoveryMinutes { get; set; } = new RangeNode<float>(3.0f, 1.0f, 8.0f);
+
+        [Menu("Maximum Fatigue", "Maximum fatigue level that can accumulate\nHigher = more variation in late-game movements")]
+        public RangeNode<float> MaxFatigue { get; set; } = new RangeNode<float>(0.8f, 0.4f, 1.2f);
+
+        [Menu("Fatigue Impact", "How much fatigue affects mouse movement\nHigher = more pronounced effect on movement")]
+        public RangeNode<float> FatigueImpactMultiplier { get; set; } = new RangeNode<float>(0.2f, 0.1f, 0.4f);
+    }
+
+    [Menu("Fatigue System")]
+    public FatigueSettings Fatigue { get; set; } = new FatigueSettings();
 }
 
 [Submenu(RenderMethod = nameof(Render))]
